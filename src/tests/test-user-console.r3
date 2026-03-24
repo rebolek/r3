@@ -92,10 +92,10 @@ my-console: context [
 		ctx [object!]
 		part [string!]
 	] [
+		path: split part #"/"
 		foreach [key val] ctx [
 			switch type? :val [
-				#(action!) #(function!) #(native!) [
-					; print [form key part]
+				#(native!) #(action!) #(function!) #(closure!) [
 					if equal? part form key [
 						refs: parse spec-of :val [
 							collect [
@@ -107,8 +107,19 @@ my-console: context [
 						return refs
 					]
 				]
-				#(object!) #(map!) [
-					; TODO
+				#(object!) #(module!) #(error!) #(port!) [
+					if equal? path/1 form key [
+						return either single? path [
+							split form words-of :val space
+						] [
+							result: get to path! load path
+							case [
+								any-object? result [mold words-of result]
+								block? result [rejoin ["1 - " length? result]]
+								'else ["???"]
+							]
+						]
+					]
 				]
 			]
 		]
@@ -165,7 +176,6 @@ my-console: context [
 			]
 			#"/" == last part [
 				part: copy part
-				print "**object/func ref**"
 				take/last part
 				; lib
 				refs: any [
