@@ -114,7 +114,7 @@ my-console: context [
 						] [
 							result: get to path! load path
 							case [
-								any-object? result [mold words-of result]
+								any-object? result [split form words-of result space]
 								block? result [rejoin ["1 - " length? result]]
 								'else ["???"]
 							]
