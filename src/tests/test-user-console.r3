@@ -88,6 +88,31 @@ my-console: context [
 		emit: func[str][ append buffer str ]
 	]
 
+	scan-context: function [
+		ctx [object!]
+		part [string!]
+	] [
+		foreach [key val] ctx [
+			switch type? :val [
+				#(action!) #(function!) #(native!) [
+					; print [form key part]
+					if equal? part form key [
+						refs: parse spec-of :val [
+							collect [
+								any [
+									set ref refinement! keep (form ref) | skip
+								]
+							]
+						]
+						return refs
+					]
+				]
+				#(object!) #(map!) [
+					; TODO
+				]
+			]
+		]
+	]
 
 	complete-input: function[
 		input-data [string!]
@@ -137,6 +162,19 @@ my-console: context [
 				if matching-part [
 					append input-data matching-part
 				]
+			]
+			#"/" == last part [
+				part: copy part
+				print "**object/func ref**"
+				take/last part
+				; lib
+				refs: any [
+					scan-context system/contexts/sys part
+					scan-context system/contexts/lib part
+					scan-context system/contexts/user part
+				]
+				print ["^[[G^[[K" mold refs]
+
 			]
 			not empty? part [ ; Word completion
 				;@@ all-words should not be created on each completion call!
