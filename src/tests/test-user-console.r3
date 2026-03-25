@@ -115,7 +115,7 @@ my-console: context [
 				]
 				#(object!) #(module!) #(error!) #(port!) [
 					if equal? path/1 form key [
-						return either single? path [
+						return either empty? last path [
 							split form words-of :val space
 						] [
 							result: get to path! load path
