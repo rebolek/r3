@@ -94,6 +94,21 @@ my-console: context [
 		]
 	]
 
+	form-all: func [
+		"Convert block of words to block of strings"
+		block [block!]
+	] [
+		split form block space
+	]
+
+	filter-matches: function [
+		"From block of strings, return only those matching pattern"
+		block [block!]
+		pattern [string!]
+	] [
+		remove-each value block [ not find/match value pattern ]
+	]
+
 	scan-context: function [
 		ctx [object!]
 		part [string!]
@@ -108,21 +123,37 @@ my-console: context [
 						] [
 							; possible optimization:
 							; if refinement is already present, do not offer it
-							refs: collect-refs :val
-							remove-each ref refs [not find/match ref last path]
+							filter-matches collect-refs :val last path
 						]
 					]
 				]
 				#(object!) #(module!) #(error!) #(port!) [
 					if equal? path/1 form key [
-						return either empty? last path [
-							split form words-of :val space
-						] [
-							result: get to path! load path
-							case [
-								any-object? result [split form words-of result space]
-								block? result [rejoin ["1 - " length? result]]
-								'else ["???"]
+						return case [
+							; top level object
+							all [ empty? last path 2 = length? path ] [
+								form-all words-of :val
+							]
+							; subobject
+							empty? last path [
+								take/last path
+								result: get to path! load path
+								case [
+									any-object? result [ form-all words-of result ]
+									block? result [ rejoin ["1 - " length? result ] ]
+									'else ["???"]
+								]
+							]
+							'else [
+								either attempt [ get to path! load path ] [
+									; fully resolved path, nothing to add
+									[]
+								] [
+									; partial word from subobject
+									partial: take/last path
+									result: form-all words-of get to path! load path
+									filter-matches result partial
+								]
 							]
 						]
 					]
