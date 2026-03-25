@@ -88,6 +88,12 @@ my-console: context [
 		emit: func[str][ append buffer str ]
 	]
 
+	collect-refs: function [fn [any-function!]] [
+		parse spec-of :fn [
+			collect [any [set ref refinement! keep (form ref) | skip]]
+		]
+	]
+
 	scan-context: function [
 		ctx [object!]
 		part [string!]
@@ -96,15 +102,15 @@ my-console: context [
 		foreach [key val] ctx [
 			switch type? :val [
 				#(native!) #(action!) #(function!) #(closure!) [
-					if equal? part form key [
-						refs: parse spec-of :val [
-							collect [
-								any [
-									set ref refinement! keep (form ref) | skip
-								]
-							]
+					if equal? path/1 form key [
+						return either empty? last path [ ; part is `word/` -> ["word" ""]
+							collect-refs :val
+						] [
+							; possible optimization:
+							; if refinement is already present, do not offer it
+							refs: collect-refs :val
+							remove-each ref refs [not find/match ref last path]
 						]
-						return refs
 					]
 				]
 				#(object!) #(module!) #(error!) #(port!) [
@@ -174,10 +180,7 @@ my-console: context [
 					append input-data matching-part
 				]
 			]
-			#"/" == last part [
-				part: copy part
-				take/last part
-				; lib
+			find part #"/" [
 				refs: any [
 					scan-context system/contexts/sys part
 					scan-context system/contexts/lib part
