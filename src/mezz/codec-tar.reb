@@ -34,6 +34,22 @@ register-codec [
 		unless binary? tar-data [
 			tar-data: read tar-data
 		]
+		; TAR has no reliable magic number (especially pre-ustar), so protect against
+		; the common user mistake of feeding a compressed tarball (e.g. .tar.bz2)
+		; directly into the TAR decoder.
+		if 3 <= length? tar-data [
+			case [
+				#{425A68} = copy/part tar-data 3 [ ; "BZh" (bzip2)
+					cause-error 'Script 'invalid-data "TAR decoder expects uncompressed .tar data (got bzip2-compressed bytes)"
+				]
+				all [2 <= length? tar-data #{1F8B} = copy/part tar-data 2] [ ; gzip
+					cause-error 'Script 'invalid-data "TAR decoder expects uncompressed .tar data (got gzip-compressed bytes)"
+				]
+				all [6 <= length? tar-data #{FD377A585A00} = copy/part tar-data 6] [ ; xz
+					cause-error 'Script 'invalid-data "TAR decoder expects uncompressed .tar data (got xz-compressed bytes)"
+				]
+			]
+		}
 		log-info 'TAR ["^[[1;32mDecode TAR data^[[m (^[[1m" length? tar-data "^[[mbytes )"]
 		
 		bin: binary tar-data
@@ -91,6 +107,14 @@ register-codec [
 
 			either any [none? only  find files name][
 				;- store data
+				if any [
+					size < 0
+					size > length? bin/buffer
+				][
+					cause-error 'Script 'invalid-data rejoin [
+						"Invalid TAR entry size (" size ") for: " mold name
+					]
+				]
 				data: binary/read/with bin 'BYTES :size
 				append result name
 				repend/only result [data hdr1 hdr2]
