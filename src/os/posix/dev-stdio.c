@@ -197,6 +197,75 @@ static void Close_StdIO_Local(void)
 
 #define READ_BYTE(c) (1 == read(Std_Inp, c, 1))
 
+static void Apply_CSI_Modifier(REBEVT *evt, REBINT modifier) {
+	// CSI-u uses the same modifier numbering as xterm's modified keys:
+	// 2=Shift, 3=Alt, 4=Alt+Shift, 5=Ctrl, 6=Ctrl+Shift, 7=Ctrl+Alt, 8=Ctrl+Alt+Shift.
+	switch (modifier) {
+	case 2: SET_FLAG(evt->flags, EVF_SHIFT);                                       break;
+	case 3: SET_FLAG(evt->flags, EVF_ALT);                                         break;
+	case 4: SET_FLAG(evt->flags, EVF_ALT);     SET_FLAG(evt->flags, EVF_SHIFT);    break;
+	case 5: SET_FLAG(evt->flags, EVF_CONTROL);                                     break;
+	case 6: SET_FLAG(evt->flags, EVF_CONTROL); SET_FLAG(evt->flags, EVF_SHIFT);    break;
+	case 7: SET_FLAG(evt->flags, EVF_CONTROL); SET_FLAG(evt->flags, EVF_ALT);      break;
+	case 8: SET_FLAG(evt->flags, EVF_CONTROL); SET_FLAG(evt->flags, EVF_ALT); SET_FLAG(evt->flags, EVF_SHIFT); break;
+	}
+}
+
+static int Parse_CSI_U_Sequence(REBEVT *evt, REBYTE *c) {
+	// CSI-u keyboard protocol: ESC [ <codepoint> [ ; <modifier> ] u
+	// Modern terminals can emit this form for printable punctuation such
+	// as '[' and ']'. Treat it as a normal key event instead of dropping
+	// the sequence and leaving the trailing 'u' in the input stream.
+	REBINT codepoint = 0;
+	REBINT modifier = 1;
+	REBINT value = 0;
+	REBINT param = 0;
+	REBINT digit;
+	REBINT i;
+	REBYTE ch;
+
+	for (i = 1; i < 32; i++) {
+		if (i <= 2) {
+			ch = c[i];
+		}
+		else {
+			if (!READ_BYTE(&ch)) return DR_ERROR;
+#ifdef DEBUG_STDIO
+			if (i < 7) c[i] = ch;
+#endif
+		}
+
+		if (ch >= '0' && ch <= '9') {
+			digit = ch - '0';
+			if (value > ((0x10FFFF - digit) / 10)) return DR_IGNORE;
+			value = value * 10 + digit;
+			continue;
+		}
+
+		if (ch == ';' && param == 0) {
+			codepoint = value;
+			value = 0;
+			param = 1;
+			continue;
+		}
+
+		if (ch == 'u') {
+			if (param == 0)
+				codepoint = value;
+			else
+				modifier = value;
+			if (codepoint <= 0 || codepoint > 0x10FFFF) return DR_IGNORE;
+			evt->type = EVT_KEY;
+			evt->data = codepoint;
+			Apply_CSI_Modifier(evt, modifier);
+			return DR_DONE;
+		}
+
+		return DR_IGNORE;
+	}
+	return DR_IGNORE;
+}
+
 static int Parse_CSI_Sequence(REBEVT *evt, REBYTE *c) {
 	// CSI sequences start with ESC [ and are followed by parameter bytes,
 	// an optional intermediate byte, and a final byte.
@@ -219,6 +288,11 @@ static int Parse_CSI_Sequence(REBEVT *evt, REBYTE *c) {
 
 	// All remaining sequences need at least one more byte
 	if (!READ_BYTE(&c[2])) return DR_ERROR;
+
+	if (c[1] == '9' && c[2] >= '0' && c[2] <= '9') {
+		// Handles CSI-u punctuation keys including '[' (91u) and ']' (93u).
+		return Parse_CSI_U_Sequence(evt, c);
+	}
 
 	switch (c[1]) {
 	case '1':
@@ -361,6 +435,7 @@ static int Parse_CSI_Sequence(REBEVT *evt, REBYTE *c) {
 	case '7': evt->data = EVK_HOME;      return DR_DONE;  // ESC[7~
 	case '8': evt->data = EVK_END;       return DR_DONE;  // ESC[8~
 	}
+	return DR_IGNORE;
 }
 #undef READ_BYTE
 
@@ -771,6 +846,8 @@ static int Read_Key_Event(REBEVT *evt) {
 			break;
 		// DR_IGNORE: sequence was consumed but unrecognized, just continue
 	}
+
+	return DR_DONE;
 }
 
 /***********************************************************************
